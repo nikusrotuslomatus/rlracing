@@ -8,6 +8,9 @@ import numpy as np
 import os
 import glob
 
+import wandb
+from tqdm import tqdm
+
 # --- RL Constants ---
 NUM_LIDAR_RAYS = 8
 STATE_DIM = NUM_LIDAR_RAYS + 4  # Lidar distances + velocity, ang_vel, dist_to_next, angle_to_next
@@ -52,6 +55,24 @@ START_LINE = ((200, 150), (400, 350))
 
 # Generate 8 evenly spaced checkpoints between OUTER_TRACK and INNER_TRACK
 NUM_CHECKPOINTS = 8
+
+entity = None
+if entity is not None:
+     wandb.init(project="car-racing-rl", entity = entity,
+                config={
+                "episodes": 1000,
+                "lidar_rays": NUM_LIDAR_RAYS,
+                "state_dim": STATE_DIM,
+                "action_dim": ACTION_DIM
+                })
+else:
+    wandb.init(project="car-racing-rl", config={
+        "episodes": 1000,
+        "lidar_rays": NUM_LIDAR_RAYS,
+        "state_dim": STATE_DIM,
+        "action_dim": ACTION_DIM
+    })
+
 
 def interpolate_polygon(poly, num_points):
     # Returns a list of num_points evenly spaced along the polygon
@@ -480,8 +501,8 @@ def train_rl_agent():
         if 'steps_done' in checkpoint:
             agent.steps_done = checkpoint['steps_done']
 
-    num_episodes = 1000
-    for i_episode in range(num_episodes):
+    num_episodes = wandb.config.episodes
+    for i_episode in tqdm(range(num_episodes)):
         state = game.reset()
         total_reward = 0
         for t in range(2000): # Max steps per episode
@@ -500,6 +521,10 @@ def train_rl_agent():
             agent.update_target_net()
 
         print(f"Episode {i_episode}, Total Reward: {total_reward:.2f}")
+        wandb.log({
+        "episode": i_episode,
+        "reward": total_reward,
+        })
 
         # Save the model every 100th episode
         if i_episode % 100 == 0:
@@ -507,6 +532,8 @@ def train_rl_agent():
                 'model_state_dict': agent.policy_net.state_dict(),
                 'steps_done': agent.steps_done
             }, f"dqn_model_ep{i_episode}.pth")
+            ckpt_path = f"dqn_model_ep{i_episode}.pth"
+            wandb.save(ckpt_path)
 
         # Render every 20th episode, and make rendered episodes last up to 2200 steps (as user changed)
         if i_episode % 20 == 0:
@@ -522,6 +549,7 @@ def train_rl_agent():
 if __name__ == "__main__":
     # To train the agent:
     train_rl_agent()
+    wandb.finish()
     
     # To play the game manually (you'll need to re-add the old main loop)
     # main() 
