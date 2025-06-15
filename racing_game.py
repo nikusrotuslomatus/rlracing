@@ -317,6 +317,7 @@ class Game:
         self.score = 0
         self.checkpoints_crossed = set()
         self.next_checkpoint_idx = 0
+        self.steps_done = 0  # Add steps_done counter
         # Orient car towards the center of the first checkpoint
         cp = CHECK_LINES[0]
         cp_center = ((cp[0][0] + cp[1][0]) / 2, (cp[0][1] + cp[1][1]) / 2)
@@ -391,35 +392,52 @@ class Game:
         if action == 7: self.car.acceleration, self.car.steering = -1, 1
         elif action == 8: self.car.acceleration, self.car.steering = -1, -1
 
+        self.steps_done += 1
         prev_pos = pygame.Vector2(self.car.body.position.x, self.car.body.position.y)
         prev_dist = self._distance_to_next_checkpoint(prev_pos)
         self.car.update()
         self.space.step(1/60)
         new_pos = pygame.Vector2(self.car.body.position.x, self.car.body.position.y)
         new_dist = self._distance_to_next_checkpoint(new_pos)
-        progress_reward = (prev_dist - new_dist) * 20  # much more valuable
+
+        # Calculate movement reward based on velocity
+        velocity = self.car.velocity.length()
+        movement_reward = velocity * 0.5  # Reward for moving at any speed
+
+        # Calculate progress reward with higher weight
+        progress_reward = (prev_dist - new_dist) * 30  # Increased from 20 to 30
+
+        # Calculate progressive time penalty
+        time_penalty = -0.05 * (1 + self.steps_done / 1000)  # Reduced base penalty from -0.1 to -0.05
 
         # Calculate reward
-        reward = -0.1 + progress_reward # Time penalty + progress
+        reward = time_penalty + progress_reward + movement_reward
         done = False
 
-        # Collision check
+        # Collision check with increased penalty
         if self.car.collided:
-            reward -= 20
-            done = True # End episode on crash
+            reward -= 20000  # Reduced from -100 to -50 to balance with other rewards
+            done = True
             self.car.collided = False
         
-        # Checkpoint reward
+        # Checkpoint reward - only if collected in correct order
         if lines_crossed((prev_pos.x, prev_pos.y), (self.car.body.position.x, self.car.body.position.y), *CHECK_LINES[self.next_checkpoint_idx]):
-            reward += 100  # much more valuable
-            self.checkpoints_crossed.add(self.next_checkpoint_idx)
-            self.next_checkpoint_idx = (self.next_checkpoint_idx + 1) % len(CHECK_LINES)
+            # Only reward if this is the next checkpoint in sequence
+            if self.next_checkpoint_idx == len(self.checkpoints_crossed):
+                reward += 8500
+                self.checkpoints_crossed.add(self.next_checkpoint_idx)
+                self.next_checkpoint_idx = (self.next_checkpoint_idx + 1) % len(CHECK_LINES)
+            else:
+                # Penalty for collecting checkpoints out of order
+                reward -= 1000
         
-        # Lap reward
+        # Lap reward and checkpoint reset
         if lines_crossed((prev_pos.x, prev_pos.y), (self.car.body.position.x, self.car.body.position.y), *START_LINE):
             if len(self.checkpoints_crossed) >= len(CHECK_LINES) / 2: # Crossed enough checkpoints
-                reward += 100
-                self.checkpoints_crossed = set()
+                reward += 20000  # Increased from 100 to 200
+                self.checkpoints_crossed = set()  # Reset checkpoints
+                self.next_checkpoint_idx = 0  # Reset to first checkpoint
+                self.steps_done = 0  # Reset steps counter for new lap
         
         self.car.acceleration = 0
         self.car.steering = 0
